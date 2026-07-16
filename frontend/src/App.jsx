@@ -9,6 +9,7 @@ const API = "http://localhost:3000";
 export default function App() {
   const [accounts, setAccounts] = useState([]);
   const [openForm, setOpenForm] = useState(false);
+  const [isRefreshingAll, setIsRefreshingAll] = useState(false);
 
   const fetchAccounts = async () => {
     try {
@@ -24,7 +25,6 @@ export default function App() {
   }, []);
 
   const handleAccountCreated = (newAccount) => {
-    // Si la API devuelve la estructura anidada { account: {...} } la extrae correctamente, si no, usa el objeto plano
     const fallbackAccount = newAccount?.account ? newAccount.account : newAccount;
     setAccounts((prev) => [fallbackAccount, ...prev]);
     setOpenForm(false);
@@ -48,10 +48,21 @@ export default function App() {
     }
   };
 
+  const handleRefreshAll = async () => {
+    setIsRefreshingAll(true);
+    try {
+      await axios.post(`${API}/accounts/refresh-all`);
+      await fetchAccounts();
+    } catch (error) {
+      console.error("Error en la sincronización masiva:", error);
+    } finally {
+      setIsRefreshingAll(false);
+    }
+  };
+
   return (
     <div className="relative min-h-screen bg-black text-zinc-100 p-4 md:p-8 overflow-x-hidden selection:bg-cyan-500 selection:text-black">
       
-      {/* CAPA DE CAPA ESTÉTICA: Rejilla digital de fondo y destellos Sci-Fi */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(6,182,212,0.08),transparent_50%)] pointer-events-none" />
       <div 
         className="absolute inset-0 pointer-events-none opacity-5"
@@ -63,7 +74,6 @@ export default function App() {
 
       <div className="relative z-10 max-w-7xl mx-auto">
         
-        {/* PANEL DE CONTROL / INTERFAZ SUPERIOR */}
         <header className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-12 pb-6 border-b border-zinc-900/80">
           <div className="flex items-center space-x-3">
             <div className="w-2 h-6 bg-cyan-400 rounded-sm animate-pulse" />
@@ -77,17 +87,32 @@ export default function App() {
             </div>
           </div>
 
-          <motion.button
-            whileHover={{ scale: 1.03, boxShadow: "0 0 20px rgba(34,211,238,0.4)" }}
-            whileTap={{ scale: 0.97 }}
-            onClick={() => setOpenForm(true)}
-            className="w-full sm:w-auto px-5 py-2.5 font-mono text-xs font-bold tracking-widest bg-cyan-400 text-zinc-950 rounded border border-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-colors hover:bg-cyan-300 cursor-pointer text-center"
-          >
-            + VINCULAR_NUEVA_CUENTA
-          </motion.button>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={handleRefreshAll}
+              disabled={isRefreshingAll}
+              className={`w-full sm:w-auto px-4 py-2.5 font-mono text-[10px] font-bold tracking-widest rounded border transition-all ${
+                isRefreshingAll 
+                  ? "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed" 
+                  : "bg-transparent text-cyan-400 border-cyan-400/30 hover:bg-cyan-400/10"
+              }`}
+            >
+              {isRefreshingAll ? "SINCRONIZANDO..." : "REFRESCAR_TODO"}
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.03, boxShadow: "0 0 20px rgba(34,211,238,0.4)" }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setOpenForm(true)}
+              className="w-full sm:w-auto px-5 py-2.5 font-mono text-xs font-bold tracking-widest bg-cyan-400 text-zinc-950 rounded border border-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-colors hover:bg-cyan-300 cursor-pointer text-center"
+            >
+              + VINCULAR_NUEVA_CUENTA
+            </motion.button>
+          </div>
         </header>
 
-        {/* MODAL DE REGISTRO CON ANIMACIÓN CONTROLADA */}
         <AnimatePresence>
           {openForm && (
             <AccountForm
@@ -97,7 +122,6 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* CONTENEDOR PRINCIPAL DEL GRID */}
         <main>
           <AccountGrid
             accounts={accounts}
@@ -105,7 +129,6 @@ export default function App() {
             onRefresh={handleRefresh}
           />
         </main>
-        
       </div>
     </div>
   );

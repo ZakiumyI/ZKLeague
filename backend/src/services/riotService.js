@@ -1,10 +1,11 @@
 const axios = require("axios");
 
+// Asegúrate de tener dotenv configurado en tu archivo principal: require('dotenv').config();
 const API_KEY = process.env.RIOT_API_KEY;
 
 /*
 |--------------------------------------------------------------------------
-| HEADERS
+| CONFIGURACIÓN Y HEADERS
 |--------------------------------------------------------------------------
 */
 
@@ -15,144 +16,73 @@ const headers = {
   "Accept-Charset": "application/x-www-form-urlencoded; charset=UTF-8"
 };
 
-/*
-|--------------------------------------------------------------------------
-| REGIONES
-|--------------------------------------------------------------------------
-|
-| Account API:
-| americas.api.riotgames.com
-|
-| LAS:
-| la2.api.riotgames.com
-|
-*/
-
 const ACCOUNT_REGION = "americas";
 const GAME_REGION = "la2";
 
 /*
 |--------------------------------------------------------------------------
-| OBTENER CUENTA POR RIOT ID
+| SERVICIOS CORE RIOT API
 |--------------------------------------------------------------------------
-|
-| Ejemplo:
-| Zakiumy#LAS
-|
-| Devuelve:
-| - puuid
-| - gameName
-| - tagLine
-|
 */
 
 async function getAccountByRiotId(gameName, tagLine) {
   try {
-    // 🧹 Expresión regular para limpiar caracteres invisibles (BiDi marks, espacios de ancho cero, etc.)
     const cleanRegex = /[\u200B-\u200D\uFEFF\u202A-\u202E\u2066-\u2069]/g;
-
     const sanitizedName = gameName ? gameName.replace(cleanRegex, "").trim() : "";
     const sanitizedTag = tagLine ? tagLine.replace(cleanRegex, "").trim() : "";
 
-    // 🚀 Codificar componentes para dar soporte completo a caracteres especiales o asiáticos (ej: チキンスープ)
-    const encodedName = encodeURIComponent(sanitizedName);
-    const encodedTag = encodeURIComponent(sanitizedTag);
+    const url = `https://${ACCOUNT_REGION}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodeURIComponent(sanitizedName)}/${encodeURIComponent(sanitizedTag)}`;
 
-    const url =
-      `https://${ACCOUNT_REGION}.api.riotgames.com/riot/account/v1/accounts/by-riot-id/${encodedName}/${encodedTag}`;
-
-    const response = await axios.get(url, {
-      headers
-    });
-
+    const response = await axios.get(url, { headers });
     return response.data;
-
   } catch (error) {
-
-    console.log("ERROR getAccountByRiotId");
-
-    console.log(error.response?.status);
-
-    console.log(error.response?.data);
-
+    console.error("ERROR getAccountByRiotId:", error.response?.status);
     throw error;
   }
 }
-
-/*
-|--------------------------------------------------------------------------
-| OBTENER SUMMONER POR PUUID
-|--------------------------------------------------------------------------
-|
-| Devuelve:
-| - summonerLevel
-| - profileIconId
-| - summonerId
-|
-*/
 
 async function getSummonerByPuuid(puuid) {
-
   try {
-
-    const url =
-      `https://${GAME_REGION}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${puuid}`;
-
-    const response = await axios.get(url, {
-      headers
-    });
-
+    const url = `https://${GAME_REGION}.api.riotgames.com/lol/summoner/v4/summoners/by-puuid/${puuid}`;
+    const response = await axios.get(url, { headers });
     return response.data;
-
   } catch (error) {
+    console.error("ERROR getSummonerByPuuid:", error.response?.status);
+    throw error;
+  }
+}
 
-    console.log("ERROR getSummonerByPuuid");
-
-    console.log(error.response?.status);
-
-    console.log(error.response?.data);
-
+async function getLeagueEntries(puuid) {
+  try {
+    const url = `https://${GAME_REGION}.api.riotgames.com/lol/league/v4/entries/by-puuid/${puuid}`;
+    const response = await axios.get(url, { headers });
+    return response.data;
+  } catch (error) {
+    console.error("ERROR getLeagueEntries:", error.response?.status);
     throw error;
   }
 }
 
 /*
 |--------------------------------------------------------------------------
-| OBTENER RANKEDS
+| SERVICIO DE SINCRONIZACIÓN (NUEVO)
 |--------------------------------------------------------------------------
-|
-| Devuelve:
-| - SoloQ
-| - Flex
-| - LP
-| - Wins
-| - Losses
-|
+| Combina los servicios para obtener un perfil completo de cuenta
 */
 
-async function getLeagueEntries(puuid) {
+async function getFullAccountData(gameName, tagLine) {
+  const account = await getAccountByRiotId(gameName, tagLine);
+  const summoner = await getSummonerByPuuid(account.puuid);
+  const leagues = await getLeagueEntries(account.puuid);
 
-  try {
-
-    const url =
-      `https://${GAME_REGION}.api.riotgames.com/lol/league/v4/entries/by-puuid/${puuid}`;
-
-    const response = await axios.get(url, {
-      headers
-    });
-
-    return response.data;
-
-  } catch (error) {
-
-    console.log("ERROR getLeagueEntries");
-
-    console.log(error.response?.status);
-
-    console.log(error.response?.data);
-
-    throw error;
-  }
+  return {
+    puuid: account.puuid,
+    gameName: account.gameName,
+    tagLine: account.tagLine,
+    summonerLevel: summoner.summonerLevel,
+    profileIconId: summoner.profileIconId,
+    leagues: leagues // Array con SoloQ y Flex
+  };
 }
 
 /*
@@ -164,5 +94,6 @@ async function getLeagueEntries(puuid) {
 module.exports = {
   getAccountByRiotId,
   getSummonerByPuuid,
-  getLeagueEntries
+  getLeagueEntries,
+  getFullAccountData
 };
