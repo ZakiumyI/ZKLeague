@@ -1,29 +1,25 @@
-require("dotenv").config();
-console.log("RIOT API KEY:", process.env.RIOT_API_KEY);
+const config = require("./config/env");
+const { openDatabase } = require("./db/database");
+const { createRiotClient } = require("./services/riot");
+const { createApp } = require("./app");
 
+const db = openDatabase(config.dbPath);
+const riot = createRiotClient({
+  apiKey: config.riotApiKey,
+  rateLimits: config.riotRateLimits
+});
 
-const express = require("express");
-const cors = require("cors");
+const app = createApp({ config, db, riot });
 
-require("./db/database");
+const server = app.listen(config.port, config.host, () => {
+  console.log(`ZKLeague API escuchando en http://${config.host}:${config.port}`);
+});
 
-const accountRoutes = require("./routes/accountRoutes");
-
-const app = express();
-
-app.use(cors());
-app.use(express.json());
-
-app.use("/accounts", accountRoutes);
-
-app.get("/", (req, res) => {
-  res.json({
-    message: "League Account Manager API"
+function shutdown() {
+  server.close(() => {
+    db.close();
+    process.exit(0);
   });
-});
-
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

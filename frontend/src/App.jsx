@@ -1,112 +1,92 @@
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import axios from "axios";
-import AccountGrid from "./components/AccountGrid";
-import AccountForm from "./components/AccountForm";
+import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import AuthScreen from "./components/AuthScreen.jsx";
+import UnlockScreen from "./components/UnlockScreen.jsx";
+import Vault from "./components/Vault.jsx";
+import { api } from "./lib/api.js";
+import { useIdleLock } from "./hooks/useIdleLock.js";
 
-const API = "http://localhost:3000";
-
+// Estados: loading → auth (sin sesión) → locked (sesión, sin clave) → unlocked
 export default function App() {
-  const [accounts, setAccounts] = useState([]);
-  const [openForm, setOpenForm] = useState(false);
-
-  const fetchAccounts = async () => {
-    try {
-      const res = await axios.get(`${API}/accounts`);
-      setAccounts(res.data);
-    } catch (error) {
-      console.error("Error al sincronizar el servidor central:", error);
-    }
-  };
+  const [phase, setPhase] = useState("loading");
+  const [session, setSession] = useState(null);
+  const [vaultKey, setVaultKey] = useState(null);
 
   useEffect(() => {
-    fetchAccounts();
+    api
+      .me()
+      .then((me) => {
+        setSession(me);
+        setPhase("locked");
+      })
+      .catch(() => setPhase("auth"));
   }, []);
 
-  const handleAccountCreated = (newAccount) => {
-    // Si la API devuelve la estructura anidada { account: {...} } la extrae correctamente, si no, usa el objeto plano
-    const fallbackAccount = newAccount?.account ? newAccount.account : newAccount;
-    setAccounts((prev) => [fallbackAccount, ...prev]);
-    setOpenForm(false);
-  };
+  const lock = useCallback(() => {
+    setVaultKey(null);
+    setPhase((p) => (p === "unlocked" ? "locked" : p));
+  }, []);
 
-  const handleDelete = async (id) => {
+  const logout = useCallback(async () => {
     try {
-      await axios.delete(`${API}/accounts/${id}`);
-      fetchAccounts();
-    } catch (error) {
-      console.error("Error en el protocolo de eliminación:", error);
+      await api.logout();
+    } catch {
+      /* la sesión puede haber expirado ya */
     }
-  };
+    setVaultKey(null);
+    setSession(null);
+    setPhase("auth");
+  }, []);
 
-  const handleRefresh = async (id) => {
-    try {
-      await axios.post(`${API}/accounts/${id}/refresh`);
-      fetchAccounts();
-    } catch (error) {
-      console.error("Error en la solicitud de sincronización:", error);
-    }
-  };
+  // Si el servidor responde 401 (sesión expirada), volvemos al login.
+  const onUnauthorized = useCallback(() => {
+    setVaultKey(null);
+    setSession(null);
+    setPhase("auth");
+  }, []);
 
-  return (
-    <div className="relative min-h-screen bg-black text-zinc-100 p-4 md:p-8 overflow-x-hidden selection:bg-cyan-500 selection:text-black">
-      
-      {/* CAPA DE CAPA ESTÉTICA: Rejilla digital de fondo y destellos Sci-Fi */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(6,182,212,0.08),transparent_50%)] pointer-events-none" />
-      <div 
-        className="absolute inset-0 pointer-events-none opacity-5"
-        style={{
-          backgroundImage: `linear-gradient(to right, #22d3ee 1px, transparent 1px), linear-gradient(to bottom, #22d3ee 1px, transparent 1px)`,
-          backgroundSize: "40px 40px"
+  useIdleLock(phase === "unlocked", lock, 10);
+
+  if (phase === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center text-zinc-500">
+        <Loader2 className="animate-spin" />
+      </div>
+    );
+  }
+
+  if (phase === "auth") {
+    return (
+      <AuthScreen
+        onAuthenticated={(s, key) => {
+          setSession(s);
+          setVaultKey(key);
+          setPhase("unlocked");
         }}
       />
+    );
+  }
 
-      <div className="relative z-10 max-w-7xl mx-auto">
-        
-        {/* PANEL DE CONTROL / INTERFAZ SUPERIOR */}
-        <header className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-12 pb-6 border-b border-zinc-900/80">
-          <div className="flex items-center space-x-3">
-            <div className="w-2 h-6 bg-cyan-400 rounded-sm animate-pulse" />
-            <div>
-              <h1 className="text-xl md:text-2xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-zinc-100 via-zinc-200 to-zinc-400 font-mono">
-                LEAGUE_ACCOUNT_MANAGER
-              </h1>
-              <p className="text-[10px] text-cyan-400/60 tracking-widest font-mono uppercase mt-0.5">
-                // Terminal Operativa del Servidor
-              </p>
-            </div>
-          </div>
+  if (phase === "locked" || !vaultKey) {
+    return (
+      <UnlockScreen
+        session={session}
+        onLogout={logout}
+        onUnlocked={(key) => {
+          setVaultKey(key);
+          setPhase("unlocked");
+        }}
+      />
+    );
+  }
 
-          <motion.button
-            whileHover={{ scale: 1.03, boxShadow: "0 0 20px rgba(34,211,238,0.4)" }}
-            whileTap={{ scale: 0.97 }}
-            onClick={() => setOpenForm(true)}
-            className="w-full sm:w-auto px-5 py-2.5 font-mono text-xs font-bold tracking-widest bg-cyan-400 text-zinc-950 rounded border border-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.2)] transition-colors hover:bg-cyan-300 cursor-pointer text-center"
-          >
-            + VINCULAR_NUEVA_CUENTA
-          </motion.button>
-        </header>
-
-        {/* MODAL DE REGISTRO CON ANIMACIÓN CONTROLADA */}
-        <AnimatePresence>
-          {openForm && (
-            <AccountForm
-              onClose={() => setOpenForm(false)}
-              onCreated={handleAccountCreated}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* CONTENEDOR PRINCIPAL DEL GRID */}
-        <main>
-          <AccountGrid
-            accounts={accounts}
-            onDelete={handleDelete}
-            onRefresh={handleRefresh}
-          />
-        </main>
-        
-      </div>
-    </div>
+  return (
+    <Vault
+      session={session}
+      vaultKey={vaultKey}
+      onLock={lock}
+      onLogout={logout}
+      onUnauthorized={onUnauthorized}
+    />
   );
 }
