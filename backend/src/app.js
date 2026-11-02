@@ -7,8 +7,9 @@ const { createSessionStore, requireAuth } = require("./middleware/session");
 const { requireSameOrigin } = require("./middleware/origin");
 const { authRouter } = require("./routes/auth");
 const { accountsRouter } = require("./routes/accounts");
+const { createRefresher } = require("./services/refresher");
 
-function createApp({ config, db, riot }) {
+function createApp({ config, db, riot, refresh = createRefresher({ db, riot }) }) {
   const app = express();
   const sessions = createSessionStore(db, config);
 
@@ -43,7 +44,7 @@ function createApp({ config, db, riot }) {
   });
 
   api.use("/auth", authRouter({ db, config, sessions }));
-  api.use("/accounts", requireAuth, accountsRouter({ db, config, riot }));
+  api.use("/accounts", requireAuth, accountsRouter({ db, config, refresh }));
   api.get("/health", (_req, res) => res.json({ ok: true }));
   api.use((_req, _res, next) => next(new HttpError(404, "Ruta no encontrada.", "not_found")));
 

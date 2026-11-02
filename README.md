@@ -82,6 +82,21 @@ edita `RIOT_API_KEY` en `backend/.env` y ejecuta `pm2 restart zkleague --update-
 la app al público hay que registrarla en developer.riotgames.com y pedir una
 *production key*.
 
+### Historial de rangos
+
+Riot no ofrece en su API el rango de temporadas pasadas, así que ZKLeague lo
+registra por su cuenta desde que agregas cada cuenta:
+
+- Cada actualización guarda una entrada en `rank_history` **solo si el rango cambió**,
+  ligada al puuid (cambiar el Riot ID de una tarjeta a otra cuenta no mezcla historiales).
+- El servidor actualiza solo cada cuenta cada `AUTO_REFRESH_HOURS` horas (12 por
+  defecto), aunque no abras la app. Si la key de Riot expiró, se detiene y reintenta
+  en el siguiente ciclo.
+- Si una cola queda sin clasificar (p. ej. tras el reinicio de temporada), la tarjeta
+  muestra **"Último: Diamante III · nov 2026"** y la cuenta se ordena por ese rango,
+  siempre por debajo de cualquier cuenta con rango actual.
+- `GET /api/accounts/:id/history` devuelve el historial completo de una cuenta.
+
 ### Ranked 5s (5v5)
 
 Riot no documenta todavía el `queueType` de Ranked 5s. Si una cuenta tiene una cola

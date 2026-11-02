@@ -73,6 +73,8 @@ module.exports = Object.freeze({
     .map((q) => q.trim())
     .filter(Boolean),
   refreshCooldownSeconds: Number(process.env.REFRESH_COOLDOWN_SECONDS ?? 60),
+  // Cada cuántas horas se actualiza sola cada cuenta (0 = desactivado).
+  autoRefreshHours: Number(process.env.AUTO_REFRESH_HOURS ?? 12),
   // Ruta al build del frontend; si existe, el backend lo sirve.
   frontendDist: path.resolve(__dirname, "..", "..", "..", "frontend", "dist")
 });

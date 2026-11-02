@@ -11,12 +11,13 @@ import {
 } from "lucide-react";
 import { useToast } from "./Toast.jsx";
 import { decryptSecret } from "../crypto/vault.js";
-import { QUEUE_LABELS, formatRank, profileIconUrl, timeAgo } from "../lib/ranks.js";
+import { QUEUE_LABELS, formatMonth, formatRank, profileIconUrl, timeAgo } from "../lib/ranks.js";
 
 const REVEAL_SECONDS = 20;
 
-function RankRow({ label, entry }) {
+function RankRow({ label, entry, lastKnown }) {
   const r = formatRank(entry);
+  const last = !r && formatRank(lastKnown);
   return (
     <div className="flex items-center justify-between gap-2 py-1 text-sm">
       <span className="w-14 shrink-0 font-mono text-xs uppercase text-zinc-500">{label}</span>
@@ -29,6 +30,20 @@ function RankRow({ label, entry }) {
           <span className="shrink-0 text-xs text-zinc-500">
             {r.winrate !== null ? `${r.winrate}% · ${r.games}p` : "—"}
           </span>
+        </>
+      ) : last ? (
+        <>
+          <span
+            className="flex-1 truncate text-zinc-500"
+            title="Sin clasificar ahora. Último rango registrado por ZKLeague."
+          >
+            <span className="text-zinc-600">Último: </span>
+            <span className="font-medium opacity-70" style={{ color: last.color }}>
+              {last.label}
+            </span>
+            <span className="ml-1.5 text-zinc-600">{last.lp} LP</span>
+          </span>
+          <span className="shrink-0 text-xs text-zinc-600">{formatMonth(lastKnown.recordedAt)}</span>
         </>
       ) : (
         <span className="flex-1 text-zinc-600">Sin clasificar</span>
@@ -183,7 +198,12 @@ export default function AccountCard({
 
       <div className="mb-3 divide-y divide-zinc-800/70 rounded-lg border border-zinc-800/70 px-3 py-1">
         {Object.entries(QUEUE_LABELS).map(([key, label]) => (
-          <RankRow key={key} label={label} entry={account.ranked[key]} />
+          <RankRow
+            key={key}
+            label={label}
+            entry={account.ranked[key]}
+            lastKnown={account.lastKnown?.[key]}
+          />
         ))}
         {account.ranked.others.map((e) => (
           <RankRow key={e.queueType} label={e.queueType.slice(0, 8)} entry={e} />
