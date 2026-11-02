@@ -1,121 +1,188 @@
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import axios from "axios";
+import { useEffect, useState } from "react";
+import { Loader2, X } from "lucide-react";
+import PasswordInput from "./PasswordInput.jsx";
+import { api } from "../lib/api.js";
+import { decryptSecret, encryptSecret } from "../crypto/vault.js";
 
-const API = "http://localhost:3000";
+// "Nombre#TAG" → { gameName, tagLine }. El nombre puede tener espacios.
+function parseRiotId(value) {
+  const idx = value.lastIndexOf("#");
+  if (idx <= 0) return null;
+  const gameName = value.slice(0, idx).trim();
+  const tagLine = value.slice(idx + 1).trim();
+  if (!gameName || !tagLine) return null;
+  return { gameName, tagLine };
+}
 
-export default function AccountForm({ onClose, onCreated }) {
-  const [form, setForm] = useState({
-    gameName: "",
-    tagLine: "",
-    region: "LA2",
-    username: "",
-    password: ""
-  });
-  const [loading, setLoading] = useState(false);
+export default function AccountForm({ account, platforms, vaultKey, onClose, onSaved, onError }) {
+  const isEdit = Boolean(account);
+  const [riotId, setRiotId] = useState(isEdit ? `${account.gameName}#${account.tagLine}` : "");
+  const [platform, setPlatform] = useState(account?.platform ?? "la2");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [notes, setNotes] = useState("");
+  const [loading, setLoading] = useState(isEdit);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
-  const submit = async (e) => {
+  useEffect(() => {
+    if (!isEdit) return;
+    decryptSecret(vaultKey, account.secret)
+      .then((s) => {
+        setUsername(s.username);
+        setPassword(s.password);
+        setNotes(s.notes);
+      })
+      .catch(() => setError("No se pudieron descifrar las credenciales."))
+      .finally(() => setLoading(false));
+  }, [isEdit, account, vaultKey]);
+
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  async function submit(e) {
     e.preventDefault();
-    if (!form.gameName || !form.tagLine) return;
-    
-    setLoading(true);
+    setError("");
+    const id = parseRiotId(riotId);
+    if (!id) return setError('Riot ID inválido. Formato: "Nombre#TAG".');
+    if (!username.trim() || !password) return setError("Usuario y contraseña son obligatorios.");
+
+    setBusy(true);
     try {
-      const res = await axios.post(`${API}/accounts`, form);
-      onCreated(res.data);
+      const secret = await encryptSecret(vaultKey, {
+        username: username.trim(),
+        password,
+        notes: notes.trim()
+      });
+      const payload = { ...id, platform, secret };
+      const saved = isEdit
+        ? await api.updateAccount(account.id, payload)
+        : await api.createAccount(payload);
+      onSaved(saved);
     } catch (err) {
-      console.error("Error al inyectar cuenta en la terminal:", err);
-    } finally {
-      setLoading(false);
+      setBusy(false);
+      if (err.status === 401) return onError(err);
+      setError(err.message);
     }
-  };
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* CAPA TRASERA OSCURA */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/85 backdrop-blur-sm"
-      />
-
-      {/* CONTENEDOR CENTRAL DEL FORMULARIO */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: -10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: -10 }}
-        className="relative w-full max-w-md bg-zinc-950 border border-cyan-500 p-6 rounded-xl shadow-[0_0_40px_rgba(6,182,212,0.2)]"
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="account-form-title"
+    >
+      <form
+        onSubmit={submit}
+        className="w-full max-w-md space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl"
+        autoComplete="off"
       >
-        <div className="mb-5 border-b border-zinc-900 pb-3">
-          <h2 className="text-xl font-bold tracking-widest text-cyan-400 uppercase font-mono">
-            // REGISTRO_CUENTA
+        <div className="flex items-center justify-between">
+          <h2 id="account-form-title" className="text-lg font-semibold">
+            {isEdit ? "Editar cuenta" : "Añadir cuenta"}
           </h2>
-          <p className="text-[11px] text-zinc-500 font-mono mt-0.5">Inicializando protocolo de enlace de Riot Games</p>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Cerrar">
+            <X size={18} />
+          </button>
         </div>
 
-        <form onSubmit={submit} className="space-y-4 font-mono">
-          <div className="grid grid-cols-3 gap-2">
-            <div className="col-span-2">
-              <label className="text-[10px] uppercase text-zinc-500 tracking-wider block mb-1">In-Game Name</label>
-              <input
-                required
-                placeholder="Ex: Hide on bush"
-                className="w-full p-2.5 bg-black border border-zinc-800 focus:border-cyan-500 text-zinc-100 text-sm rounded outline-none transition-colors"
-                onChange={(e) => setForm({ ...form, gameName: e.target.value })}
-              />
+        {loading ? (
+          <div className="flex justify-center py-10 text-zinc-500">
+            <Loader2 className="animate-spin" />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <div>
+                <label htmlFor="riotId" className="label">Riot ID</label>
+                <input
+                  id="riotId"
+                  className="input"
+                  placeholder="Nombre#TAG"
+                  value={riotId}
+                  onChange={(e) => setRiotId(e.target.value)}
+                  spellCheck={false}
+                  autoFocus
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="platform" className="label">Servidor</label>
+                <select
+                  id="platform"
+                  className="input"
+                  value={platform}
+                  onChange={(e) => setPlatform(e.target.value)}
+                >
+                  {platforms.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
+
             <div>
-              <label className="text-[10px] uppercase text-zinc-500 tracking-wider block mb-1">Tag</label>
+              <label htmlFor="login-user" className="label">Usuario de inicio de sesión</label>
               <input
+                id="login-user"
+                className="input font-mono"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                autoCapitalize="off"
+                data-1p-ignore
+                data-lpignore="true"
                 required
-                placeholder="KR1"
-                className="w-full p-2.5 bg-black border border-zinc-800 focus:border-cyan-500 text-zinc-100 text-sm rounded outline-none transition-colors text-center"
-                onChange={(e) => setForm({ ...form, tagLine: e.target.value })}
               />
             </div>
-          </div>
 
-          <div>
-            <label className="text-[10px] uppercase text-zinc-500 tracking-wider block mb-1">Identificador de Acceso (User)</label>
-            <input
-              required
-              placeholder="Username de login"
-              className="w-full p-2.5 bg-black border border-zinc-800 focus:border-cyan-500 text-zinc-100 text-sm rounded outline-none transition-colors"
-              onChange={(e) => setForm({ ...form, username: e.target.value })}
-            />
-          </div>
+            <div>
+              <label htmlFor="login-pass" className="label">Contraseña de la cuenta</label>
+              <PasswordInput
+                id="login-pass"
+                value={password}
+                onChange={setPassword}
+                autoComplete="new-password"
+                data-1p-ignore
+                data-lpignore="true"
+                required
+              />
+            </div>
 
-          <div>
-            <label className="text-[10px] uppercase text-zinc-500 tracking-wider block mb-1">Clave de Encriptación (Pass)</label>
-            <input
-              required
-              type="password"
-              placeholder="••••••••••••"
-              className="w-full p-2.5 bg-black border border-zinc-800 focus:border-cyan-500 text-pink-400 text-sm rounded outline-none transition-colors font-sans"
-              onChange={(e) => setForm({ ...form, password: e.target.value })}
-            />
-          </div>
+            <div>
+              <label htmlFor="notes" className="label">Notas (opcional, cifradas)</label>
+              <textarea
+                id="notes"
+                className="input min-h-16 resize-y"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                maxLength={500}
+                placeholder="Correo asociado, smurf, etc."
+              />
+            </div>
 
-          <div className="flex gap-3 pt-4 border-t border-zinc-900 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 border border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/50 text-zinc-400 text-xs font-bold tracking-widest py-3 rounded transition-all cursor-pointer text-center"
-            >
-              CANCELAR
-            </button>
+            {error && <p className="text-sm text-red-400" role="alert">{error}</p>}
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold tracking-widest py-3 rounded shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all disabled:opacity-50 cursor-pointer text-center"
-            >
-              {loading ? "PROCESANDO..." : "VINCULAR"}
-            </button>
-          </div>
-        </form>
-      </motion.div>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn btn-ghost" onClick={onClose}>
+                Cancelar
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy && <Loader2 size={16} className="animate-spin" />}
+                {busy ? "Consultando Riot…" : "Guardar"}
+              </button>
+            </div>
+          </>
+        )}
+      </form>
     </div>
   );
 }
