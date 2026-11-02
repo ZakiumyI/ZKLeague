@@ -42,14 +42,25 @@ export function rankScore(entry) {
   return 1 + tierIdx * 10_000 + division * 1_000 + lp;
 }
 
+const CURRENT_BONUS = 1_000_000;
+function queueScore(account, queue) {
+  const current = account.ranked?.[queue];
+  if (current) return CURRENT_BONUS + rankScore(current);
+  return rankScore(account.lastKnown?.[queue]);
+}
+
 export function compareAccounts(a, b) {
   return (
-    rankScore(b.ranked.solo) - rankScore(a.ranked.solo) ||
-    rankScore(b.ranked.flex) - rankScore(a.ranked.flex) ||
-    rankScore(b.ranked.team5) - rankScore(a.ranked.team5) ||
+    queueScore(b, "solo") - queueScore(a, "solo") ||
+    queueScore(b, "flex") - queueScore(a, "flex") ||
+    queueScore(b, "team5") - queueScore(a, "team5") ||
     (b.summonerLevel ?? 0) - (a.summonerLevel ?? 0) ||
     a.gameName.localeCompare(b.gameName, "es")
   );
+}
+
+export function formatMonth(ms) {
+  return new Date(ms).toLocaleDateString("es-CL", { month: "short", year: "numeric" });
 }
 
 export function formatRank(entry) {

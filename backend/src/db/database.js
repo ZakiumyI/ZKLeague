@@ -48,6 +48,36 @@ function openDatabase(dbPath) {
       updated_at        INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
+
+    -- Historial de rangos: una fila cada vez que cambia el rango de una cola.
+    -- Ligado al puuid para no mezclar historiales si se cambia el Riot ID.
+    CREATE TABLE IF NOT EXISTS rank_history (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      puuid        TEXT NOT NULL,
+      queue_type   TEXT NOT NULL,
+      tier         TEXT NOT NULL,
+      rank         TEXT,
+      lp           INTEGER NOT NULL,
+      wins         INTEGER NOT NULL,
+      losses       INTEGER NOT NULL,
+      recorded_at  INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_history_account
+      ON rank_history(account_id, puuid, queue_type, id);
+  `);
+
+  // Primera vez: sembrar el historial con los rangos ya guardados.
+  db.exec(`
+    INSERT INTO rank_history (account_id, puuid, queue_type, tier, rank, lp, wins, losses, recorded_at)
+    SELECT a.id, a.puuid,
+           json_extract(e.value, '$.queueType'), json_extract(e.value, '$.tier'),
+           json_extract(e.value, '$.rank'), json_extract(e.value, '$.lp'),
+           json_extract(e.value, '$.wins'), json_extract(e.value, '$.losses'),
+           a.refreshed_at
+    FROM accounts a, json_each(a.ranked_json) e
+    WHERE a.puuid IS NOT NULL AND a.refreshed_at IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM rank_history h WHERE h.account_id = a.id);
   `);
 
   return db;

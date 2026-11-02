@@ -1,12 +1,12 @@
 const express = require("express");
 const { HttpError, badRequest, requireString, requireCipherBlob } = require("../lib/http");
-const { classifyQueues, compareAccounts, toEntry } = require("../lib/ranks");
-const { PLATFORMS, RiotError } = require("../services/riot");
+const { classifyQueues, compareAccounts } = require("../lib/ranks");
+const { PLATFORMS } = require("../services/riot");
 
 const GAME_NAME = { min: 1, max: 32 };
 const TAG_LINE = { min: 1, max: 10 };
 
-function accountsRouter({ db, config, riot }) {
+function accountsRouter({ db, config, refresh: refreshAccount }) {
   const router = express.Router();
 
   const listStmt = db.prepare("SELECT * FROM accounts WHERE user_id = ?");
@@ -16,17 +16,33 @@ function accountsRouter({ db, config, riot }) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   const deleteStmt = db.prepare("DELETE FROM accounts WHERE id = ? AND user_id = ?");
-  const saveProfileStmt = db.prepare(`
-    UPDATE accounts SET
-      game_name = ?, tag_line = ?, puuid = ?, summoner_level = ?, profile_icon_id = ?,
-      ranked_json = ?, refreshed_at = ?, refresh_error = NULL
-    WHERE id = ?
+  // Último rango registrado de cada cola, para el puuid actual de cada cuenta.
+  const lastKnownStmt = db.prepare(`
+    SELECT h.account_id, h.queue_type AS queueType, h.tier, h.rank, h.lp, h.wins, h.losses,
+           h.recorded_at AS recordedAt
+    FROM rank_history h
+    JOIN accounts a ON a.id = h.account_id
+    WHERE a.user_id = ? AND h.puuid = a.puuid
+      AND h.id = (SELECT MAX(id) FROM rank_history x
+                  WHERE x.account_id = h.account_id AND x.puuid = h.puuid
+                    AND x.queue_type = h.queue_type)
   `);
-  const saveErrorStmt = db.prepare(
-    "UPDATE accounts SET refresh_error = ?, refreshed_at = ? WHERE id = ?"
-  );
+  const historyStmt = db.prepare(`
+    SELECT queue_type AS queueType, tier, rank, lp, wins, losses, recorded_at AS recordedAt
+    FROM rank_history WHERE account_id = ? AND puuid = ? ORDER BY id ASC
+  `);
 
-  function serialize(row) {
+  function lastKnownFor(userId) {
+    const byAccount = new Map();
+    for (const r of lastKnownStmt.all(userId)) {
+      const { account_id, ...entry } = r;
+      if (!byAccount.has(account_id)) byAccount.set(account_id, []);
+      byAccount.get(account_id).push(entry);
+    }
+    return byAccount;
+  }
+
+  function serialize(row, lastKnownEntries = []) {
     const entries = row.ranked_json ? JSON.parse(row.ranked_json) : [];
     return {
       id: row.id,
@@ -38,6 +54,7 @@ function accountsRouter({ db, config, riot }) {
       summonerLevel: row.summoner_level,
       profileIconId: row.profile_icon_id,
       ranked: classifyQueues(entries, config.riotQueue5v5),
+      lastKnown: classifyQueues(lastKnownEntries, config.riotQueue5v5),
       refreshedAt: row.refreshed_at,
       refreshError: row.refresh_error,
       hasRiotData: row.puuid !== null
@@ -58,34 +75,13 @@ function accountsRouter({ db, config, riot }) {
     return platform;
   }
 
-  // Consulta Riot y guarda el resultado. Si Riot falla, la cuenta se conserva
-  // igual (las credenciales son lo importante) y se guarda el error.
   async function refresh(row) {
-    try {
-      const profile = await riot.fetchProfile({
-        gameName: row.game_name,
-        tagLine: row.tag_line,
-        platform: row.platform
-      });
-      saveProfileStmt.run(
-        profile.gameName,
-        profile.tagLine,
-        profile.puuid,
-        profile.summonerLevel,
-        profile.profileIconId,
-        JSON.stringify(profile.entries.map(toEntry)),
-        Date.now(),
-        row.id
-      );
-    } catch (err) {
-      if (!(err instanceof RiotError) && err.name !== "TimeoutError") {
-        console.error("[riot] error inesperado:", err);
-      }
-      const message =
-        err instanceof RiotError ? err.message : "No se pudo contactar a Riot.";
-      saveErrorStmt.run(message, Date.now(), row.id);
-    }
-    return getStmt.get(row.id, row.user_id);
+    return (await refreshAccount(row)).row;
+  }
+
+  // Serializa una sola cuenta incluyendo su último rango conocido.
+  function serializeOne(row) {
+    return serialize(row, lastKnownFor(row.user_id).get(row.id));
   }
 
   router.get("/platforms", (_req, res) => {
@@ -95,7 +91,11 @@ function accountsRouter({ db, config, riot }) {
   });
 
   router.get("/", (req, res) => {
-    const accounts = listStmt.all(req.userId).map(serialize).sort(compareAccounts);
+    const lastKnown = lastKnownFor(req.userId);
+    const accounts = listStmt
+      .all(req.userId)
+      .map((row) => serialize(row, lastKnown.get(row.id)))
+      .sort(compareAccounts);
     res.json(accounts);
   });
 
@@ -117,7 +117,7 @@ function accountsRouter({ db, config, riot }) {
     ).lastInsertRowid;
 
     const row = await refresh(getStmt.get(Number(id), req.userId));
-    res.status(201).json(serialize(row));
+    res.status(201).json(serializeOne(row));
   });
 
   router.patch("/:id", async (req, res) => {
@@ -163,7 +163,7 @@ function accountsRouter({ db, config, riot }) {
 
     let updated = getStmt.get(row.id, req.userId);
     if (riotIdChanged) updated = await refresh(updated);
-    res.json(serialize(updated));
+    res.json(serializeOne(updated));
   });
 
   router.post("/:id/refresh", async (req, res) => {
@@ -171,9 +171,15 @@ function accountsRouter({ db, config, riot }) {
     const cooldownMs = config.refreshCooldownSeconds * 1000;
     if (row.refreshed_at && Date.now() - row.refreshed_at < cooldownMs) {
       // Muy reciente: devolvemos lo guardado sin gastar llamadas a Riot.
-      return res.json(serialize(row));
+      return res.json(serializeOne(row));
     }
-    res.json(serialize(await refresh(row)));
+    res.json(serializeOne(await refresh(row)));
+  });
+
+  // Historial completo de rangos de una cuenta (puuid actual).
+  router.get("/:id/history", (req, res) => {
+    const row = loadOwned(req);
+    res.json(row.puuid ? historyStmt.all(row.id, row.puuid) : []);
   });
 
   router.delete("/:id", (req, res) => {
