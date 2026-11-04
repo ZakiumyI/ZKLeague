@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Lock, LogOut, Plus, RefreshCw, Search } from "lucide-react";
+import { Hourglass, Loader2, Lock, LogOut, Plus, RefreshCw, Search } from "lucide-react";
 import Brand from "./Brand.jsx";
 import AccountCard from "./AccountCard.jsx";
 import AccountForm from "./AccountForm.jsx";
+import MatchesModal from "./MatchesModal.jsx";
 import { useToast } from "./Toast.jsx";
 import { api } from "../lib/api.js";
-import { compareAccounts } from "../lib/ranks.js";
+import { QUEUE_LABELS, compareAccounts, decayLabel } from "../lib/ranks.js";
 
 export default function Vault({ session, vaultKey, onLock, onLogout, onUnauthorized }) {
   const toast = useToast();
@@ -15,6 +16,7 @@ export default function Vault({ session, vaultKey, onLock, onLogout, onUnauthori
   const [editing, setEditing] = useState(null); // null | "new" | account
   const [refreshing, setRefreshing] = useState(new Set());
   const [bulk, setBulk] = useState(null); // { done, total }
+  const [matchesFor, setMatchesFor] = useState(null);
 
   const handleError = useCallback(
     (err) => {
@@ -80,6 +82,19 @@ export default function Vault({ session, vaultKey, onLock, onLogout, onUnauthori
     }
   }
 
+  // Cuentas que decaen en 7 días o menos (o ya están decayendo), más urgentes primero.
+  const atRisk = useMemo(() => {
+    const out = [];
+    for (const acc of accounts ?? []) {
+      for (const [queue, d] of Object.entries(acc.decay ?? {})) {
+        if (d && ["warning", "danger", "decaying"].includes(d.status)) {
+          out.push({ acc, queue, d });
+        }
+      }
+    }
+    return out.sort((x, y) => x.d.daysLeft - y.d.daysLeft);
+  }, [accounts]);
+
   const visible = useMemo(() => {
     if (!accounts) return [];
     const q = query.trim().toLowerCase();
@@ -127,6 +142,29 @@ export default function Vault({ session, vaultKey, onLock, onLogout, onUnauthori
         </div>
       ) : (
         <>
+          {atRisk.length > 0 && (
+            <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-950/20 p-3">
+              <p className="mb-2 flex items-center gap-2 text-sm font-medium text-amber-300">
+                <Hourglass size={16} />
+                {atRisk.length === 1 ? "1 cuenta puede decaer pronto" : `${atRisk.length} colas pueden decaer pronto`}
+              </p>
+              <ul className="flex flex-wrap gap-2 text-xs">
+                {atRisk.map(({ acc, queue, d }) => (
+                  <li
+                    key={`${acc.id}-${queue}`}
+                    className={`rounded-md border px-2 py-1 ${
+                      d.status === "warning"
+                        ? "border-amber-500/30 text-amber-200"
+                        : "border-red-500/40 text-red-200"
+                    }`}
+                  >
+                    <b>{acc.gameName}</b> · {QUEUE_LABELS[queue]} · {decayLabel(d)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="relative mb-6 max-w-sm">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
             <input
@@ -147,6 +185,7 @@ export default function Vault({ session, vaultKey, onLock, onLogout, onUnauthori
                 onRefresh={() => refreshOne(acc.id)}
                 onEdit={() => setEditing(acc)}
                 onDelete={() => remove(acc.id)}
+                onOpenMatches={() => setMatchesFor(acc)}
                 style={{ animationDelay: `${i * 30}ms` }}
               />
             ))}
@@ -155,6 +194,10 @@ export default function Vault({ session, vaultKey, onLock, onLogout, onUnauthori
             <p className="py-10 text-center text-sm text-zinc-500">Sin resultados.</p>
           )}
         </>
+      )}
+
+      {matchesFor && (
+        <MatchesModal account={matchesFor} onClose={() => setMatchesFor(null)} onError={handleError} />
       )}
 
       {editing && (

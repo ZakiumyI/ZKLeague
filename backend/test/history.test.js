@@ -24,6 +24,8 @@ const config = {
 const state = {};
 const riot = {
   calls: 0,
+  async fetchRankedMatchIds() { return []; },
+  async fetchMatchSummary() { return null; },
   fail: null,
   async fetchProfile({ gameName, tagLine }) {
     this.calls++;

@@ -94,3 +94,49 @@ export function timeAgo(ms) {
   const d = Math.round(h / 24);
   return `hace ${d} d`;
 }
+
+export const QUEUE_NAMES = { 420: "Solo/Q", 440: "Flex" };
+export const queueName = (id) => QUEUE_NAMES[id] ?? `Ranked ${id}`;
+
+export function championIconUrl(id) {
+  return `https://raw.communitydragon.org/latest/plugins/rcp-be-lol-game-data/global/default/v1/champion-icons/${id}.png`;
+}
+
+export function kdaRatio(k, d, a) {
+  return d === 0 ? "Perfecto" : ((k + a) / d).toFixed(2);
+}
+
+export const DECAY_STYLES = {
+  ok: { color: "text-emerald-400", bg: "bg-emerald-500/10 border-emerald-500/30" },
+  warning: { color: "text-amber-400", bg: "bg-amber-500/10 border-amber-500/30" },
+  danger: { color: "text-red-400", bg: "bg-red-500/10 border-red-500/40" },
+  decaying: { color: "text-red-300", bg: "bg-red-500/20 border-red-500/60" },
+  unknown: { color: "text-zinc-500", bg: "bg-zinc-800/60 border-zinc-700" }
+};
+
+export function decayLabel(d) {
+  if (!d) return null;
+  if (d.status === "unknown") return "Decay: sin datos";
+  if (d.status === "decaying") return `En decay (−${d.lpPerDay} LP/día)`;
+  return `Decay en ${d.daysLeft} ${d.daysLeft === 1 ? "día" : "días"}`;
+}
+
+// "LeeSin" → "Lee Sin", con excepciones donde la clave interna no es el nombre.
+const CHAMP_NAMES = {
+  MonkeyKing: "Wukong",
+  Chogath: "Cho'Gath",
+  Kaisa: "Kai'Sa",
+  Khazix: "Kha'Zix",
+  KogMaw: "Kog'Maw",
+  Velkoz: "Vel'Koz",
+  Belveth: "Bel'Veth",
+  RekSai: "Rek'Sai",
+  KSante: "K'Sante",
+  Leblanc: "LeBlanc",
+  FiddleSticks: "Fiddlesticks",
+  Nunu: "Nunu & Willump",
+  Renata: "Renata Glasc"
+};
+export function champName(key = "") {
+  return CHAMP_NAMES[key] ?? key.replace(/([a-z])([A-Z])/g, "$1 $2");
+}

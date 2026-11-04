@@ -39,5 +39,6 @@ export const api = {
   createAccount: (payload) => request("POST", "/accounts", payload),
   updateAccount: (id, payload) => request("PATCH", `/accounts/${id}`, payload),
   refreshAccount: (id) => request("POST", `/accounts/${id}/refresh`),
-  deleteAccount: (id) => request("DELETE", `/accounts/${id}`)
+  deleteAccount: (id) => request("DELETE", `/accounts/${id}`),
+  matches: (id, limit = 50) => request("GET", `/accounts/${id}/matches?limit=${limit}`)
 };

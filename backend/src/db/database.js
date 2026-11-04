@@ -65,6 +65,28 @@ function openDatabase(dbPath) {
     );
     CREATE INDEX IF NOT EXISTS idx_history_account
       ON rank_history(account_id, puuid, queue_type, id);
+
+    -- Partidas ranked de cada cuenta (resumen del propio jugador). Inmutables.
+    CREATE TABLE IF NOT EXISTS matches (
+      account_id    INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      puuid         TEXT NOT NULL,
+      match_id      TEXT NOT NULL,
+      queue_id      INTEGER NOT NULL,
+      game_start    INTEGER NOT NULL,
+      duration      INTEGER NOT NULL,
+      win           INTEGER NOT NULL,
+      remake        INTEGER NOT NULL,
+      champion_id   INTEGER NOT NULL,
+      champion_name TEXT NOT NULL,
+      position      TEXT NOT NULL,
+      kills         INTEGER NOT NULL,
+      deaths        INTEGER NOT NULL,
+      assists       INTEGER NOT NULL,
+      cs            INTEGER NOT NULL,
+      PRIMARY KEY (account_id, match_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_matches_account
+      ON matches(account_id, puuid, game_start DESC);
   `);
 
   // Primera vez: sembrar el historial con los rangos ya guardados.

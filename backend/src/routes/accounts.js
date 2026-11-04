@@ -2,6 +2,7 @@ const express = require("express");
 const { HttpError, badRequest, requireString, requireCipherBlob } = require("../lib/http");
 const { classifyQueues, compareAccounts } = require("../lib/ranks");
 const { PLATFORMS } = require("../services/riot");
+const { decayForAccount } = require("../lib/decay");
 
 const GAME_NAME = { min: 1, max: 32 };
 const TAG_LINE = { min: 1, max: 10 };
@@ -32,6 +33,35 @@ function accountsRouter({ db, config, refresh: refreshAccount }) {
     FROM rank_history WHERE account_id = ? AND puuid = ? ORDER BY id ASC
   `);
 
+  const MATCH_COLS = `match_id AS matchId, queue_id AS queueId, game_start AS gameStart,
+    duration, win, remake, champion_id AS championId, champion_name AS championName,
+    position, kills, deaths, assists, cs`;
+
+  // Últimas 40 partidas de cada cuenta del usuario (puuid actual).
+  const recentMatchesStmt = db.prepare(`
+    SELECT account_id, ${MATCH_COLS} FROM (
+      SELECT m.*, ROW_NUMBER() OVER (PARTITION BY m.account_id ORDER BY m.game_start DESC) AS rn
+      FROM matches m JOIN accounts a ON a.id = m.account_id
+      WHERE a.user_id = ? AND m.puuid = a.puuid
+    ) WHERE rn <= 40
+    ORDER BY game_start DESC
+  `);
+  const accountMatchesStmt = db.prepare(`
+    SELECT ${MATCH_COLS} FROM matches
+    WHERE account_id = ? AND puuid = ? ORDER BY game_start DESC LIMIT ?
+  `);
+
+  const toMatch = (m) => ({ ...m, win: Boolean(m.win), remake: Boolean(m.remake) });
+
+  function matchesFor(userId) {
+    const byAccount = new Map();
+    for (const { account_id, ...m } of recentMatchesStmt.all(userId)) {
+      if (!byAccount.has(account_id)) byAccount.set(account_id, []);
+      byAccount.get(account_id).push(toMatch(m));
+    }
+    return byAccount;
+  }
+
   function lastKnownFor(userId) {
     const byAccount = new Map();
     for (const r of lastKnownStmt.all(userId)) {
@@ -42,8 +72,9 @@ function accountsRouter({ db, config, refresh: refreshAccount }) {
     return byAccount;
   }
 
-  function serialize(row, lastKnownEntries = []) {
+  function serialize(row, lastKnownEntries = [], matches = []) {
     const entries = row.ranked_json ? JSON.parse(row.ranked_json) : [];
+    const ranked = classifyQueues(entries, config.riotQueue5v5);
     return {
       id: row.id,
       gameName: row.game_name,
@@ -53,7 +84,9 @@ function accountsRouter({ db, config, refresh: refreshAccount }) {
       secret: JSON.parse(row.secret),
       summonerLevel: row.summoner_level,
       profileIconId: row.profile_icon_id,
-      ranked: classifyQueues(entries, config.riotQueue5v5),
+      ranked,
+      decay: decayForAccount(ranked, matches),
+      recentMatches: matches.slice(0, 10),
       lastKnown: classifyQueues(lastKnownEntries, config.riotQueue5v5),
       refreshedAt: row.refreshed_at,
       refreshError: row.refresh_error,
@@ -76,12 +109,18 @@ function accountsRouter({ db, config, refresh: refreshAccount }) {
   }
 
   async function refresh(row) {
-    return (await refreshAccount(row)).row;
+    // Desde la web limitamos el tiempo dedicado a partidas para no exceder el
+    // timeout del proxy; lo que falte se descarga en la próxima actualización.
+    return (await refreshAccount(row, { matchBudgetMs: 20_000 })).row;
   }
 
   // Serializa una sola cuenta incluyendo su último rango conocido.
   function serializeOne(row) {
-    return serialize(row, lastKnownFor(row.user_id).get(row.id));
+    return serialize(
+      row,
+      lastKnownFor(row.user_id).get(row.id),
+      row.puuid ? accountMatchesStmt.all(row.id, row.puuid, 40).map(toMatch) : []
+    );
   }
 
   router.get("/platforms", (_req, res) => {
@@ -92,9 +131,10 @@ function accountsRouter({ db, config, refresh: refreshAccount }) {
 
   router.get("/", (req, res) => {
     const lastKnown = lastKnownFor(req.userId);
+    const matches = matchesFor(req.userId);
     const accounts = listStmt
       .all(req.userId)
-      .map((row) => serialize(row, lastKnown.get(row.id)))
+      .map((row) => serialize(row, lastKnown.get(row.id), matches.get(row.id)))
       .sort(compareAccounts);
     res.json(accounts);
   });
@@ -180,6 +220,13 @@ function accountsRouter({ db, config, refresh: refreshAccount }) {
   router.get("/:id/history", (req, res) => {
     const row = loadOwned(req);
     res.json(row.puuid ? historyStmt.all(row.id, row.puuid) : []);
+  });
+
+  // Partidas ranked guardadas de una cuenta (máx. 100).
+  router.get("/:id/matches", (req, res) => {
+    const row = loadOwned(req);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    res.json(row.puuid ? accountMatchesStmt.all(row.id, row.puuid, limit).map(toMatch) : []);
   });
 
   router.delete("/:id", (req, res) => {

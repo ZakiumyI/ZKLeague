@@ -5,7 +5,7 @@ const PLATFORMS = {
   la1: { label: "LAN", region: "americas" },
   na1: { label: "NA", region: "americas" },
   br1: { label: "BR", region: "americas" },
-  oc1: { label: "OCE", region: "americas" },
+  oc1: { match: "sea", label: "OCE", region: "americas" },
   euw1: { label: "EUW", region: "europe" },
   eun1: { label: "EUNE", region: "europe" },
   tr1: { label: "TR", region: "europe" },
@@ -13,9 +13,9 @@ const PLATFORMS = {
   me1: { label: "ME", region: "europe" },
   kr: { label: "KR", region: "asia" },
   jp1: { label: "JP", region: "asia" },
-  sg2: { label: "SEA", region: "asia" },
-  tw2: { label: "TW", region: "asia" },
-  vn2: { label: "VN", region: "asia" }
+  sg2: { match: "sea", label: "SEA", region: "asia" },
+  tw2: { match: "sea", label: "TW", region: "asia" },
+  vn2: { match: "sea", label: "VN", region: "asia" }
 };
 
 class RiotError extends Error {
@@ -98,6 +98,44 @@ function createRiotClient({ apiKey, rateLimits, fetchImpl = fetch }) {
   const clean = (s) => s.replace(/[​-‍﻿‪-‮⁦-⁩]/g, "").trim();
 
   return {
+    /** Ids de partidas ranked (todas las colas), más recientes primero. */
+    async fetchRankedMatchIds({ puuid, platform, count = 20, startTime, queue }) {
+      const p = PLATFORMS[platform];
+      if (!p) throw new RiotError(400, `Plataforma desconocida: ${platform}`);
+      const params = new URLSearchParams({ type: "ranked", count: String(count) });
+      if (startTime) params.set("startTime", String(startTime));
+      if (queue) params.set("queue", String(queue));
+      return get(
+        `https://${p.match ?? p.region}.api.riotgames.com/lol/match/v5/matches/by-puuid/${enc(puuid)}/ids?${params}`
+      );
+    },
+
+    /** Detalle de una partida, reducido a los datos del jugador indicado. */
+    async fetchMatchSummary({ matchId, puuid, platform }) {
+      const p = PLATFORMS[platform];
+      const match = await get(
+        `https://${p.match ?? p.region}.api.riotgames.com/lol/match/v5/matches/${enc(matchId)}`
+      );
+      const info = match.info;
+      const me = info.participants.find((x) => x.puuid === puuid);
+      if (!me) return null;
+      return {
+        matchId,
+        queueId: info.queueId,
+        gameStart: info.gameStartTimestamp ?? info.gameCreation,
+        duration: info.gameDuration,
+        win: Boolean(me.win),
+        remake: Boolean(me.gameEndedInEarlySurrender),
+        championId: me.championId,
+        championName: me.championName,
+        position: me.teamPosition || me.individualPosition || "",
+        kills: me.kills,
+        deaths: me.deaths,
+        assists: me.assists,
+        cs: (me.totalMinionsKilled ?? 0) + (me.neutralMinionsKilled ?? 0)
+      };
+    },
+
     async fetchProfile({ gameName, tagLine, platform }) {
       const p = PLATFORMS[platform];
       if (!p) throw new RiotError(400, `Plataforma desconocida: ${platform}`);
