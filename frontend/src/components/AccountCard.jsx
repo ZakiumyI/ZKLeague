@@ -4,14 +4,28 @@ import {
   Copy,
   Eye,
   EyeOff,
+  History,
+  Hourglass,
   Pencil,
   RefreshCw,
   Trash2,
   UserRound
 } from "lucide-react";
 import { useToast } from "./Toast.jsx";
+import ChampIcon from "./ChampIcon.jsx";
 import { decryptSecret } from "../crypto/vault.js";
-import { QUEUE_LABELS, formatMonth, formatRank, profileIconUrl, timeAgo } from "../lib/ranks.js";
+import {
+  DECAY_STYLES,
+  QUEUE_LABELS,
+  decayLabel,
+  formatMonth,
+  formatRank,
+  champName,
+  kdaRatio,
+  profileIconUrl,
+  queueName,
+  timeAgo
+} from "../lib/ranks.js";
 
 const REVEAL_SECONDS = 20;
 
@@ -52,6 +66,64 @@ function RankRow({ label, entry, lastKnown }) {
   );
 }
 
+function DecayBadge({ decay }) {
+  const label = decayLabel(decay);
+  if (!label) return null;
+  const style = DECAY_STYLES[decay.status];
+  const title =
+    decay.status === "unknown"
+      ? "No hay partidas recientes guardadas para estimarlo. Pulsa ↻ o revisa el cliente."
+      : `Estimación a partir de tus partidas. Máximo ${decay.max} días; al vaciarse pierdes ${decay.lpPerDay} LP por día.`;
+  return (
+    <span
+      className={`ml-[3.75rem] mb-1 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${style.bg} ${style.color}`}
+      title={title}
+    >
+      <Hourglass size={11} /> {label}
+    </span>
+  );
+}
+
+function MatchStrip({ matches, onOpen }) {
+  if (!matches?.length) return null;
+  const played = matches.filter((m) => !m.remake);
+  const wins = played.filter((m) => m.win).length;
+  const wr = played.length ? Math.round((wins / played.length) * 100) : null;
+  return (
+    <button
+      onClick={onOpen}
+      className="mb-3 w-full rounded-lg border border-zinc-800/70 p-2 text-left transition hover:border-zinc-700"
+      title="Ver historial completo"
+    >
+      <div className="mb-1.5 flex items-center justify-between text-xs">
+        <span className="flex items-center gap-1 text-zinc-500">
+          <History size={12} /> Últimas {matches.length}
+        </span>
+        {wr !== null && (
+          <span className={wr >= 50 ? "text-emerald-400" : "text-red-400"}>
+            {wins}V {played.length - wins}D · {wr}%
+          </span>
+        )}
+      </div>
+      <div className="flex gap-1">
+        {matches.map((m) => (
+          <div
+            key={m.matchId}
+            className={`relative rounded border-b-2 ${
+              m.remake ? "border-zinc-600 opacity-50" : m.win ? "border-emerald-400" : "border-red-500"
+            }`}
+            title={`${champName(m.championName)} · ${m.kills}/${m.deaths}/${m.assists} (${kdaRatio(m.kills, m.deaths, m.assists)}) · ${
+              m.remake ? "Remake" : m.win ? "Victoria" : "Derrota"
+            } · ${queueName(m.queueId)} · ${timeAgo(m.gameStart)}`}
+          >
+            <ChampIcon id={m.championId} name={m.championName} size={24} />
+          </div>
+        ))}
+      </div>
+    </button>
+  );
+}
+
 function SecretField({ label, value, visible, onCopy }) {
   return (
     <div className="flex items-center gap-2">
@@ -74,6 +146,7 @@ export default function AccountCard({
   onRefresh,
   onEdit,
   onDelete,
+  onOpenMatches,
   style
 }) {
   const toast = useToast();
@@ -198,17 +271,17 @@ export default function AccountCard({
 
       <div className="mb-3 divide-y divide-zinc-800/70 rounded-lg border border-zinc-800/70 px-3 py-1">
         {Object.entries(QUEUE_LABELS).map(([key, label]) => (
-          <RankRow
-            key={key}
-            label={label}
-            entry={account.ranked[key]}
-            lastKnown={account.lastKnown?.[key]}
-          />
+          <div key={key}>
+            <RankRow label={label} entry={account.ranked[key]} lastKnown={account.lastKnown?.[key]} />
+            <DecayBadge decay={account.decay?.[key]} />
+          </div>
         ))}
         {account.ranked.others.map((e) => (
           <RankRow key={e.queueType} label={e.queueType.slice(0, 8)} entry={e} />
         ))}
       </div>
+
+      <MatchStrip matches={account.recentMatches} onOpen={onOpenMatches} />
 
       <div className="space-y-1.5 rounded-lg bg-zinc-950/40 p-2">
         <SecretField

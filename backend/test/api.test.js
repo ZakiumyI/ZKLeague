@@ -21,6 +21,8 @@ const config = {
 
 const fakeRiot = {
   calls: 0,
+  async fetchRankedMatchIds() { return []; },
+  async fetchMatchSummary() { return null; },
   async fetchProfile({ gameName, tagLine }) {
     this.calls++;
     if (gameName === "NoExiste") throw new RiotError(404, "Riot ID no encontrado en esa región.");

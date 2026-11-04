@@ -97,6 +97,21 @@ registra por su cuenta desde que agregas cada cuenta:
   siempre por debajo de cualquier cuenta con rango actual.
 - `GET /api/accounts/:id/history` devuelve el historial completo de una cuenta.
 
+### Historial de partidas y decay
+
+- Cada actualización descarga las **partidas ranked nuevas** (match-v5) y las guarda en
+  la tabla `matches`; las ya guardadas no se vuelven a pedir. La primera vez trae unas
+  20–40 por cuenta. Desde la web se dedica como máximo ~20 s a partidas (por el timeout
+  del proxy); lo que falte se completa en la siguiente actualización.
+- La tarjeta muestra las últimas 10 (campeón, victoria/derrota, winrate). Al hacer clic
+  se abre el historial con KDA, CS/min y campeones más jugados, filtrable por cola.
+- **Decay (estimado):** Riot no publica los días del banco, así que se simula con las
+  partidas: Diamante +7 días por partida (máx. 28, −50 LP/día), Master+ +1 día (máx. 14,
+  −75 LP/día), por cola. Arriba de la bóveda aparece un aviso con las cuentas que decaen
+  en 7 días o menos. Puede diferir en ±1 día del cliente, y es menos fiable si la cuenta
+  subió a Diamante hace poco.
+- `GET /api/accounts/:id/matches?limit=50` devuelve las partidas guardadas.
+
 ### Ranked 5s (5v5)
 
 Riot no documenta todavía el `queueType` de Ranked 5s. Si una cuenta tiene una cola
